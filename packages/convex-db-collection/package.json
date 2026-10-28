@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/convex-db-collection",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Convex collection for TanStack DB",
   "author": "Tanner Linsley",
   "license": "MIT",
