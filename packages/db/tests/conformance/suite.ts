@@ -1081,11 +1081,17 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         await h.flush()
 
         expect(h.current().isReady).toBe(false)
-        expect(h.current().data).toHaveLength(SEED.length)
+        if (driver.firstLoadWaits) {
+          // The data read waits for the first ready state; the keyed state
+          // already holds the rows the source emitted.
+          expect(h.current().data).toBeUndefined()
+          expect(h.current().state.size).toBe(SEED.length)
+        } else expect(h.current().data).toHaveLength(SEED.length)
 
         source.markReady()
         await h.flush()
         expect(h.current().isReady).toBe(true)
+        expect(h.current().data).toHaveLength(SEED.length)
         h.unmount()
       },
     )

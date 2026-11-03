@@ -360,6 +360,9 @@ const solidDriver: LiveQueryDriver = {
   // rather than exposing a readable isLoadingError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
+  // Reading `query()` is a Solid 2 async read: it waits under <Loading> until
+  // the query is first ready, while `state` and the flags stay readable.
+  firstLoadWaits: true,
   knownGaps: [],
   features: { serverSnapshot: false, suspense: true, pooledEqFilters: true },
 }

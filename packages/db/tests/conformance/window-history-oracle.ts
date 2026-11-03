@@ -805,8 +805,19 @@ async function checkPendingWindowHistory(
     const compare = (offset: number | undefined, checkpoint: string) => {
       try {
         const expectedRows = offset === undefined ? [] : expected(offset)
+        const { data } = handle.current()
         checkWindowObservation(
-          { rows: handle.current().data, collection: handle.collection() },
+          {
+            // A binding whose data read waits for the first ready state
+            // publishes no value before it; that is the same empty snapshot.
+            rows:
+              offset === undefined &&
+              driver.firstLoadWaits &&
+              data === undefined
+                ? []
+                : data,
+            collection: handle.collection(),
+          },
           {
             rows: expectedRows,
             previousCollection: collection,

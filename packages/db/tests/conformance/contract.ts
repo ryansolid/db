@@ -392,6 +392,14 @@ export interface LiveQueryDriver {
    * declare `false`.
    */
   comparesQueryIdentity: boolean
+  /**
+   * Whether reading `data` waits until the query is first ready, as a Solid 2
+   * async read does under `<Loading>`. Before that the driver reports `data`
+   * as `undefined`; rows the source already emitted are still in `state`, and
+   * status flags stay readable. After the first ready state the laws are the
+   * same as for a binding that never waits.
+   */
+  firstLoadWaits?: boolean
   /** No active waivers. Kept empty in drivers to make this boundary explicit. */
   knownGaps?: ReadonlyArray<never>
   /**
