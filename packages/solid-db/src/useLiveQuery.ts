@@ -1,10 +1,11 @@
 import {
-  batch,
-  createEffect,
   createMemo,
-  createResource,
+  createRenderEffect,
   createSignal,
+  createStore,
   onCleanup,
+  reconcile,
+  runWithOwner,
   untrack,
 } from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
@@ -18,8 +19,7 @@ import {
   resolveLiveQueryValue,
   toBoundaryError,
 } from '@tanstack/db'
-import { createStore, reconcile } from 'solid-js/store'
-import { createRowStore, createStoreReadView } from './store-materialization'
+import { createRowStore } from './store-materialization'
 import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
@@ -48,7 +48,7 @@ type InferConditionalResultType<TContext extends Context> =
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
  * @example
  * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
@@ -94,24 +94,24 @@ type InferConditionalResultType<TContext extends Context> =
  *     </Match>
  *     <Match when={todosQuery.isReady}>
  *       <For each={todosQuery()}>
- *         {(todo) => <li key={todo.id}>{todo.text}</li>}
+ *         {(todo) => <li>{todo.text}</li>}
  *       </For>
  *     </Match>
  *   </Switch>
  * )
  *
  * @example
- * // Use Suspense boundaries
+ * // Wait for the first ready state under a Loading boundary
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todoCollection })
  * )
  *
  * return (
- *   <Suspense fallback={<div>Loading...</div>}>
+ *   <Loading fallback={<div>Loading...</div>}>
  *     <For each={todosQuery()}>
- *       {(todo) => <li key={todo.id}>{todo.text}</li>}
+ *       {(todo) => <li>{todo.text}</li>}
  *     </For>
- *   </Suspense>
+ *   </Loading>
  * )
  */
 
@@ -138,7 +138,7 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
  * @example
  * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
@@ -187,7 +187,7 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
  * @example
  * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
@@ -209,7 +209,7 @@ export function useLiveQuery<TContext extends Context>(
  * const sharedQuery = useLiveQuery(() => sharedCollection)
  *
  * return (
- *  <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
+ *  <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item {...item} />}</For></div>}>
  *    <Match when={sharedQuery.isLoading}>
  *      <div>Loading...</div>
  *    </Match>
@@ -278,7 +278,6 @@ export function useLiveQuery(
         return resolveNext(prepared)
       })
     },
-    undefined,
     { name: `TanstackDBCollectionMemo` },
   )
 
@@ -297,22 +296,24 @@ export function useLiveQuery(
     name: `TanstackDBData`,
   })
 
-  const readData = createStoreReadView(data)
-
-  // Track collection status reactively
-  const [status, setStatus] = createSignal(
-    collection() ? collection()!.status : (`disabled` as const),
-    {
-      name: `TanstackDBStatus`,
-    },
+  // Collection publications are external events, but they can arrive while
+  // Solid runs a computation: subscribing delivers the initial rows at once,
+  // and a Collection write made from a memo publishes synchronously. Writes
+  // into the hook's state therefore run outside any owner.
+  const publish = (write: () => void) => runWithOwner(null, write)
+  const [status, setStatus] = createSignal<CollectionStatus | `disabled`>(
+    untrack(() => collection()?.status ?? `disabled`),
+    { name: `TanstackDBStatus`, ownedWrite: true },
   )
-  const [health, setHealth] = createSignal<HealthNode | undefined>(undefined)
+  const [health, setHealth] = createSignal<HealthNode | undefined>(undefined, {
+    ownedWrite: true,
+  })
   const syncStatus = (view: {
     status: CollectionStatus | `disabled`
     health: HealthNode | undefined
   }) => {
     setStatus(view.status)
-    setHealth(view.health)
+    setHealth(() => view.health)
   }
   const syncState = (entries: Iterable<[string | number, any]>) => {
     state.clear()
@@ -348,19 +349,17 @@ export function useLiveQuery(
       if (!retainedKeys.has(key)) rowsByKey.delete(key)
     }
 
-    setData((previous) => reconcile(nextRows, { key: null })(previous))
+    // Row stores keep their identity; the array follows result order.
+    setData(reconcile(nextRows, null))
   }
 
-  // Generation guard for the resource's async continuations: Solid discards a
-  // superseded fetch's *return value*, but the writes below are side effects
-  // into hook-scoped state and would still run — resurrecting rows/status from
-  // a collection that has already been replaced.
-  let resourceGeneration = 0
+  // The preload observer holds the Collection from the first read until the
+  // subscribing effect owns it, so a Collection with a short gcTime is not
+  // collected between readiness and the effect's subscription.
   let localWait:
     | {
         observer: LiveQueryObserver<any, any>
         collection: Collection<any, any, any>
-        ready: boolean
       }
     | undefined
   let subscribedCollection: Collection<any, any, any> | undefined
@@ -368,84 +367,80 @@ export function useLiveQuery(
     localWait?.observer.dispose()
     localWait = undefined
   }
-  onCleanup(() => {
-    resourceGeneration++
-    releaseLocalWait()
-  })
+  onCleanup(releaseLocalWait)
 
-  const [getDataResource] = createResource(
-    () => ({ currentCollection: collection() }),
-    async ({ currentCollection }) => {
-      const generation = ++resourceGeneration
-      releaseLocalWait()
-      if (!currentCollection) {
-        return []
-      }
-      syncStatus(currentCollection)
-      try {
-        const observer = createLiveQueryObserver(currentCollection)
-        localWait = {
-          observer,
-          collection: currentCollection,
-          ready: false,
+  // Readiness is async: reading the result before the first ready state
+  // waits under the nearest `<Loading>` boundary, and a load error reaches the
+  // nearest `<Errored>` boundary. Each Collection waits once; later updates
+  // are delivered by the subscription below.
+  const ready = createMemo<true | Promise<true>>(
+    () => {
+      const currentCollection = collection()
+      if (!currentCollection) return true
+      // A crashed Collection also rejects preload; keep its crash visible.
+      const fail = (error: unknown): never => {
+        if (collection() === currentCollection) {
+          setStatus(
+            currentCollection.status === `crashed` ? `crashed` : `error`,
+          )
         }
-        try {
-          await observer.preload()
-        } catch (error) {
-          if (generation === resourceGeneration) releaseLocalWait()
-          throw error
-        }
-        if (generation !== resourceGeneration) return data
-        localWait.ready = true
-        // `preload` waits for readiness but does not itself
-        // retain the Collection after it settles. Hold one observer
-        // subscription across Solid's ready-before-commit Suspense gap.
-        observer.subscribe(() => {})
-        // Solid disposes a provisional effect only after the resource settles
-        // and Suspense re-evaluates the branch. Check on the next turn: a real
-        // commit still owns the Collection, while a suspended branch keeps the
-        // preload observer until its later commit or root cleanup.
-        setTimeout(() => {
-          if (
-            localWait?.observer === observer &&
-            subscribedCollection === currentCollection
-          ) {
-            releaseLocalWait()
-          }
-        }, 0)
-      } catch (error) {
-        if (generation !== resourceGeneration) return data
-        // A crashed Collection also rejects preload; keep its crash visible.
-        setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
         throw toBoundaryError(error)
       }
-      if (generation !== resourceGeneration) {
-        return data
-      }
-      // Initialize state with current collection data
-      batch(() => {
-        syncState(currentCollection.entries())
-        syncDataFromCollection(currentCollection)
-        syncStatus(currentCollection)
+      return untrack(() => {
+        releaseLocalWait()
+        // A first load that already failed answers the first read at once.
+        if (
+          currentCollection.status === `error` ||
+          currentCollection.status === `crashed`
+        ) {
+          return fail(currentCollection.health.error?.cause)
+        }
+        const observer = createLiveQueryObserver(currentCollection)
+        if (observer.getSnapshot().isReady) {
+          observer.dispose()
+          return true as const
+        }
+        localWait = { observer, collection: currentCollection }
+        let preload: Promise<void>
+        try {
+          // Hold the Collection across the wait and until the effect subscribes.
+          observer.subscribe(() => {})
+          preload = observer.preload()
+        } catch (error) {
+          // A sync function that throws crashes the Collection as it starts.
+          releaseLocalWait()
+          return fail(error)
+        }
+        return preload.then(
+          () => {
+            if (
+              localWait?.observer === observer &&
+              subscribedCollection === currentCollection
+            ) {
+              releaseLocalWait()
+            }
+            return true as const
+          },
+          (error: unknown) => {
+            if (localWait?.observer === observer) releaseLocalWait()
+            return fail(error)
+          },
+        )
       })
-      return data
     },
-    {
-      name: `TanstackDBData`,
-      deferStream: false,
-      initialValue: data,
-    },
+    { name: `TanstackDBReady`, lazy: true },
   )
 
-  createEffect(() => {
-    const currentCollection = collection()
+  createRenderEffect(collection, (currentCollection) => {
     if (!currentCollection) {
-      setStatus(`disabled` as const)
-      setHealth(undefined)
-      state.clear()
-      rowsByKey.clear()
-      rowsCollection = undefined
-      setData([])
+      publish(() => {
+        setStatus(`disabled` as const)
+        setHealth(undefined)
+        state.clear()
+        rowsByKey.clear()
+        rowsCollection = undefined
+        setData(reconcile([], null))
+      })
       return
     }
 
@@ -459,11 +454,10 @@ export function useLiveQuery(
     const observer = createLiveQueryObserver(currentCollection)
     // Clear any keys carried over from a previous collection before the new
     // observer re-seeds via `includeInitialState` (which only inserts current
-    // rows, never deletes stale ones). Without this, switching collections
-    // leaves the dropped keys in `state` until the async resource reconciles.
-    state.clear()
-    observer.subscribe((changes: Array<ChangeMessage<any>> | undefined) => {
-      batch(() => {
+    // rows, never deletes stale ones).
+    publish(() => state.clear())
+    const listener = (changes: Array<ChangeMessage<any>> | undefined) =>
+      publish(() => {
         if (changes) {
           for (const change of changes) {
             switch (change.type) {
@@ -484,37 +478,52 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         syncStatus(observer.getSnapshot())
       })
-    })
+    try {
+      observer.subscribe(listener)
+    } catch {
+      // Starting sync can crash the Collection at once. Its status shows the
+      // crash, and the first read reaches `<Errored>` through `ready`.
+      observer.dispose()
+      publish(() => {
+        setStatus(currentCollection.status === `crashed` ? `crashed` : `error`)
+        setHealth(() => currentCollection.health)
+      })
+      return
+    }
     subscribedCollection = currentCollection
-    if (localWait?.ready && localWait.collection === currentCollection) {
-      releaseLocalWait()
+    if (localWait?.collection === currentCollection) {
+      void Promise.resolve(untrack(ready)).then(() => {
+        if (subscribedCollection === currentCollection) releaseLocalWait()
+      })
     }
     // An already-ready empty collection produces no initial row batch. Bring
-    // ordered data and status in line synchronously instead of waiting for the
-    // resource continuation to correct the previous collection's rows.
-    batch(() => {
+    // ordered data and status in line synchronously.
+    publish(() => {
       syncDataFromCollection(currentCollection)
       syncStatus(observer.getSnapshot())
     })
 
-    onCleanup(() => {
+    return () => {
       if (subscribedCollection === currentCollection) {
         subscribedCollection = undefined
       }
       observer.dispose()
-    })
+    }
   })
 
-  // We have to remove getters from the resource function so we wrap it
   function getData() {
+    // Waits under `<Loading>` until the current Collection is first ready.
+    ready()
     const currentCollection = collection()
-    if (currentCollection && isSingleResultCollection(currentCollection)) {
-      // Force resource tracking so Suspense works
-      getDataResource()
-      return readData[0]
+    // A crash ends reads at any time: the Collection can no longer serve
+    // them. Later sync problems only show in `health`, with the data kept.
+    if (status() === `crashed`) {
+      throw toBoundaryError(currentCollection?.health.error?.cause)
     }
-    const result = getDataResource()
-    return result === data ? readData : result
+    if (currentCollection && isSingleResultCollection(currentCollection)) {
+      return data[0]
+    }
+    return data
   }
 
   Object.defineProperties(getData, {

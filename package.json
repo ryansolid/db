@@ -36,7 +36,7 @@
     "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",
     "test:doc-snippets": "node scripts/check-doc-snippets.mjs",
-    "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
+    "test:sherif": "sherif -i zod -i vite -p offline-transactions-react-native -p shopping-list-react-native",
     "generate-docs": "node scripts/generate-error-docs.mjs && node scripts/generate-docs.ts"
   },
   "devDependencies": {

@@ -11,6 +11,9 @@ packages:
   - packages/**
   - '!packages/convex-db-collection/e2e/auth-app/runtime'
   - examples/**/*
+  # The Solid todo example runs on SolidStart 1, which stays on Solid 1, so it
+  # keeps the published Solid 1 adapter for now.
+  - '!examples/solid/todo'
 
 overrides:
   # Chokidar 4.0.2 and 4.0.3 fail the trust policy; 4.0.1 satisfies v4 consumers.

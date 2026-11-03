@@ -6,8 +6,10 @@ id: adapter
 ## Installation
 
 ```sh
-npm install @tanstack/solid-db
+npm install @tanstack/solid-db solid-js@next
 ```
+
+`@tanstack/solid-db` 1.0 requires Solid 2 (`solid-js` 2.0.0-rc.20 or later). Solid 1 apps use `@tanstack/solid-db` 0.3.x or the earlier 1.0 release candidates (1.0.0-rc.1.2 and before).
 
 ## Solid Primitives
 
@@ -24,7 +26,7 @@ The `useLiveQuery` primitive creates a live query that automatically updates you
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
 import { eq } from '@tanstack/db'
-import { Show, For } from 'solid-js'
+import { For, Loading } from 'solid-js'
 
 function TodoList() {
   const query = useLiveQuery((q) =>
@@ -34,18 +36,36 @@ function TodoList() {
   )
 
   return (
-    <Show when={!query.isLoading} fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
         <For each={query()}>
           {(todo) => <li>{todo.text}</li>}
         </For>
       </ul>
-    </Show>
+    </Loading>
   )
 }
 ```
 
 **Note:** `query()` reads the array; `query.isLoading` and `query.status` read reactive status properties.
+
+### Loading and errors
+
+Reading `query()` is an async read in Solid 2. Until the query is first ready, the read waits and the nearest `<Loading>` boundary shows its fallback. After that, later updates arrive in place and the boundary does not show its fallback again.
+
+A first load that fails, and a crash at any time, reach the nearest `<Errored>` boundary. The boundary receives the sync adapter's error when it is an `Error`, and otherwise an `Error` whose `cause` is the value the adapter reported. Sync problems after the first ready state only show in `query.health`, with the data kept.
+
+```tsx
+import { Errored, For, Loading } from 'solid-js'
+
+<Errored fallback={(error) => <div>{error().message}</div>}>
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={query()}>{(todo) => <li>{todo.text}</li>}</For>
+  </Loading>
+</Errored>
+```
+
+The status properties never wait, so `query.isLoading`, `query.isReady`, `query.status`, `query.health` and `query.state` can be read outside a boundary. While a query loads, rows that the source has already synced are in `query.state` before `query()` is ready.
 
 ### Reactive Queries with Signals
 
@@ -145,7 +165,8 @@ function TodoList() {
     q.from({ todos: todosCollection })
      .where(({ todos }) => gt(todos.priority, currentPriority))
   )
-  // Won't update when minPriority changes!
+  // Won't update when minPriority changes! In development, Solid 2 also
+  // warns about this untracked read in the component body.
 
   return <div>{query().length} todos</div>
 }

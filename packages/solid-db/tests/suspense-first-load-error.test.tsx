@@ -2,7 +2,7 @@
  * First-load failure at the error boundary witness.
  *
  * Authority: maintainer decision for this branch, recorded in
- * docs/guides/error-handling.md ("Using Suspense and Error Boundaries"). A
+ * docs/guides/error-handling.md ("Using Loading and Error Boundaries"). A
  * failed first load reaches the nearest error boundary as an Error. When the
  * sync adapter's cause is an Error, the boundary receives that exact object.
  * When it is not, such as an HTTP response body, the boundary receives an
@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@solidjs/testing-library'
 import { createCollection } from '@tanstack/db'
-import { ErrorBoundary, Suspense } from 'solid-js'
+import { Errored, Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 
 type Post = { id: string; title: string }
@@ -49,16 +49,16 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
         return <div>{query().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
+        <Errored
           fallback={(error) => {
-            caught.push(error)
+            caught.push(error())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {
@@ -119,16 +119,16 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
         return <div>{query().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
+        <Errored
           fallback={(error) => {
-            caught.push(error)
+            caught.push(error())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {

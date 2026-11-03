@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import { createCollection, eq } from '@tanstack/db'
-import { Suspense } from 'solid-js'
+import { Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -66,7 +66,7 @@ function createLaggingSource(id: string) {
 }
 
 describe(`useLiveQuery initial readiness over a lagging on-demand source`, () => {
-  it(`releases isReady and Suspense when the subset settles and stays ready`, async () => {
+  it(`releases isReady and Loading when the subset settles and stays ready`, async () => {
     const source = createLaggingSource(`solid-exposure-lagging`)
     const statusView = renderHook(() =>
       useLiveQuery((q) =>
@@ -86,9 +86,9 @@ describe(`useLiveQuery initial readiness over a lagging on-demand source`, () =>
       return <div data-testid="title">{query()[0]?.title}</div>
     }
     const view = render(() => (
-      <Suspense fallback={<div data-testid="waiting">Waiting</div>}>
+      <Loading fallback={<div data-testid="waiting">Waiting</div>}>
         <SuspendedTitle />
-      </Suspense>
+      </Loading>
     ))
     try {
       await waitFor(() => expect(source.loadStarted()).toBe(true))

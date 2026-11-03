@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@solidjs/testing-library'
-import { Suspense } from 'solid-js'
+import { Loading } from 'solid-js'
 import { eq } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -25,7 +25,7 @@ import type {
 import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle'
 
 /**
- * # Does Solid Suspense release offline on a covered on-demand demand?
+ * # Does Solid Loading release offline on a covered on-demand demand?
  *
  * Receiving witness for persisted demand coverage. The law, the histories, and
  * the checkpoint records are the receiving contract's
@@ -39,13 +39,13 @@ import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/pe
  * at once through the source, or loads nothing. Session 2 is offline on the
  * same `node:sqlite` database, with the history's upstream behavior.
  *
- * Production path: `useLiveQuery` under Solid `Suspense`, over a real persisted
+ * Production path: `useLiveQuery` under Solid `Loading`, over a real persisted
  * on-demand Collection and `SQLiteCorePersistenceAdapter`.
  *
  * Observation: at each checkpoint of session 2, whether the fallback still
  * renders (`loading`) or the rows are rendered (`ready`).
  *
- * Limits: one filter and one Solid render path. Suspense releases at query
+ * Limits: one filter and one Solid render path. Loading releases at query
  * readiness, so this host checks the readiness that the wrapper's settlement
  * feeds.
  */
@@ -66,7 +66,7 @@ function GroupA(props: {
   )
 }
 
-// Reads the Suspense output: the fallback while the query is loading, or the
+// Reads the Loading output: the fallback while the query is loading, or the
 // rendered rows once it is ready.
 function renderedOutcome(view: ReturnType<typeof render>): QueryObservation {
   if (view.queryByTestId(`waiting`) !== null) return { status: `loading` }
@@ -74,7 +74,7 @@ function renderedOutcome(view: ReturnType<typeof render>): QueryObservation {
   return { status: `ready`, rows: text === `empty` ? [] : text.split(`,`) }
 }
 
-describe(`Solid Suspense over a persisted on-demand Collection offline`, () => {
+describe(`Solid Loading over a persisted on-demand Collection offline`, () => {
   it.each(FRAMEWORK_HISTORY_IDS.map(receivingHistory))(
     `$description`,
     async (history) => {
@@ -95,9 +95,9 @@ describe(`Solid Suspense over a persisted on-demand Collection offline`, () => {
           answerRows: [A1, A2],
         })
         const view = render(() => (
-          <Suspense fallback={<div data-testid="waiting">Loading</div>}>
+          <Loading fallback={<div data-testid="waiting">Loading</div>}>
             <GroupA collection={first.collection} />
-          </Suspense>
+          </Loading>
         ))
         const content = await view.findByTestId(`rows`)
         await vi.waitFor(() => expect(content.textContent).toBe(`a1,a2`))
@@ -114,9 +114,9 @@ describe(`Solid Suspense over a persisted on-demand Collection offline`, () => {
       })
       const loadStartedAt = Date.now()
       const view = render(() => (
-        <Suspense fallback={<div data-testid="waiting">Loading</div>}>
+        <Loading fallback={<div data-testid="waiting">Loading</div>}>
           <GroupA collection={second.collection} />
-        </Suspense>
+        </Loading>
       ))
       try {
         const checkpoints = await recordCheckpoints(

@@ -31,7 +31,7 @@ Query function that defines what data to fetch
 
 `Accessor`\<`InferResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
 
 ### Examples
 
@@ -83,7 +83,7 @@ return (
     </Match>
     <Match when={todosQuery.isReady}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Match>
   </Switch>
@@ -91,17 +91,17 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Wait for the first ready state under a Loading boundary
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -133,7 +133,7 @@ Query function that defines what data to fetch
 
 `Accessor`\<`InferConditionalResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
 
 ### Examples
 
@@ -185,7 +185,7 @@ return (
     </Match>
     <Match when={todosQuery.isReady}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Match>
   </Switch>
@@ -193,17 +193,17 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Wait for the first ready state under a Loading boundary
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -235,7 +235,7 @@ Configuration object with query and options
 
 `Accessor`\<`InferResultType`\<`TContext`\>\> & `object` & `LiveQueryStatusFlags`
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
 
 ### Examples
 
@@ -314,7 +314,7 @@ Pre-created live query collection to subscribe to
 
 `Accessor`\<`TResult`[]\> & `object` & `LiveQueryStatusFlags`
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
 
 ### Examples
 
@@ -341,7 +341,7 @@ const handleToggle = (id) => {
 const sharedQuery = useLiveQuery(() => sharedCollection)
 
 return (
- <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
+ <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item {...item} />}</For></div>}>
    <Match when={sharedQuery.isLoading}>
      <div>Loading...</div>
    </Match>
@@ -386,7 +386,7 @@ Create a live query using a query function
 
 `Accessor`\<`TResult` \| `undefined`\> & `object` & `LiveQueryStatusFlags`
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns data, waiting under `<Loading>` until the query is first ready, with state and status information as properties
 
 ### Examples
 
@@ -438,7 +438,7 @@ return (
     </Match>
     <Match when={todosQuery.isReady}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Match>
   </Switch>
@@ -446,16 +446,16 @@ return (
 ```
 
 ```ts
-// Use Suspense boundaries
+// Wait for the first ready state under a Loading boundary
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```

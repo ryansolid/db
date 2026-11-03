@@ -13,10 +13,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   For,
-  Suspense,
-  createComputed,
+  Loading,
+  NotReadyError,
+  createRenderEffect,
   createRoot,
   createSignal,
+  flush,
 } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -87,6 +89,18 @@ const initialIssues: Array<Issue> = [
   },
 ]
 
+// Solid 2 reads of async data wait for it: before the first ready state the
+// result accessor throws NotReadyError (a `<Loading>` boundary shows its
+// fallback), while `state` and the status flags stay readable.
+function waitsForFirstReady(read: () => unknown) {
+  try {
+    read()
+    return false
+  } catch (error) {
+    return error instanceof NotReadyError
+  }
+}
+
 describe(`Query Collections`, () => {
   it(`clears data immediately when switching to an already-ready empty collection`, async () => {
     return createRoot(async (dispose) => {
@@ -112,6 +126,7 @@ describe(`Query Collections`, () => {
       await waitFor(() => expect(result()).toHaveLength(3))
 
       setCurrent(empty)
+      flush()
 
       expect(result()).toHaveLength(0)
       expect(result.state.size).toBe(0)
@@ -653,6 +668,7 @@ describe(`Query Collections`, () => {
 
       // Narrow to only John Smith (age 35); ids 1 and 2 must not linger.
       setMinAge(32)
+      flush()
 
       expect(rendered.result.state.size).toBe(1)
       expect(rendered.result.state.has(`1`)).toBe(false)
@@ -877,14 +893,17 @@ describe(`Query Collections`, () => {
       )
 
       // Track each render state
-      createComputed(() => {
-        renderStates.push({
-          stateSize: queryResult.state.size,
-          hasTempKey: queryResult.state.has(`["temp-key","1"]`),
-          hasPermKey: queryResult.state.has(`["4","1"]`),
-          timestamp: Date.now(),
-        })
-      })
+      createRenderEffect(
+        () => {
+          renderStates.push({
+            stateSize: queryResult.state.size,
+            hasTempKey: queryResult.state.has(`["temp-key","1"]`),
+            hasPermKey: queryResult.state.has(`["4","1"]`),
+            timestamp: Date.now(),
+          })
+        },
+        () => {},
+      )
 
       return queryResult
     })
@@ -1623,7 +1642,7 @@ describe(`Query Collections`, () => {
       // Initially isLoading should be true
       expect(result.isLoading).toBe(true)
       expect(result.state.size).toBe(0)
-      expect(result()).toEqual([])
+      expect(waitsForFirstReady(result)).toBe(true)
 
       // Start sync manually
       collection.preload()
@@ -1653,8 +1672,8 @@ describe(`Query Collections`, () => {
         expect(result.state.size).toBe(1)
       })
       expect(result.isLoading).toBe(true) // Still loading
-      expect(result()).toHaveLength(1)
-      expect(result()[0]).toMatchObject({
+      expect(waitsForFirstReady(result)).toBe(true)
+      expect([...result.state.values()][0]).toMatchObject({
         id: `1`,
         name: `John Smith`,
       })
@@ -1679,7 +1698,7 @@ describe(`Query Collections`, () => {
         expect(result.state.size).toBe(2)
       })
       expect(result.isLoading).toBe(true) // Still loading
-      expect(result()).toHaveLength(2)
+      expect(waitsForFirstReady(result)).toBe(true)
 
       // Now mark as ready
       syncMarkReady!()
@@ -1777,8 +1796,10 @@ describe(`Query Collections`, () => {
         expect(result.state.size).toBe(2)
       })
       expect(result.isLoading).toBe(true)
-      expect(result()).toHaveLength(2)
-      expect(result().every((p) => p.team === `team1`)).toBe(true)
+      expect(waitsForFirstReady(result)).toBe(true)
+      expect([...result.state.values()].every((p) => p.team === `team1`)).toBe(
+        true,
+      )
 
       // Mark ready
       syncMarkReady!()
@@ -1895,8 +1916,8 @@ describe(`Query Collections`, () => {
         expect(result.state.size).toBe(1)
       })
       expect(result.isLoading).toBe(true)
-      expect(result()).toHaveLength(1)
-      expect(result()[0]).toMatchObject({
+      expect(waitsForFirstReady(result)).toBe(true)
+      expect([...result.state.values()][0]).toMatchObject({
         id: `1`,
         title: `First Issue`,
         userName: `John Doe`,
@@ -1946,7 +1967,7 @@ describe(`Query Collections`, () => {
       expect(result.isLoading).toBe(true)
       expect(result.isReady).toBe(false)
       expect(result.state.size).toBe(0)
-      expect(result()).toEqual([])
+      expect(waitsForFirstReady(result)).toBe(true)
 
       // Start sync manually
       collection.preload()
@@ -1982,7 +2003,8 @@ describe(`Query Collections`, () => {
           }),
         )
 
-        const [enabled, setEnabled] = createSignal(false)
+        // The test writes it from the root body, which Solid 2 treats as owned.
+        const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
             return useLiveQuery((q) => {
@@ -2039,7 +2061,8 @@ describe(`Query Collections`, () => {
           }),
         )
 
-        const [enabled, setEnabled] = createSignal(false)
+        // The test writes it from the root body, which Solid 2 treats as owned.
+        const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
             return useLiveQuery((q) => {
@@ -2094,7 +2117,8 @@ describe(`Query Collections`, () => {
             initialData: initialPersons,
           }),
         )
-        const [enabled, setEnabled] = createSignal(false)
+        // The test writes it from the root body, which Solid 2 treats as owned.
+        const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(() =>
           useLiveQuery((q) =>
             enabled()
@@ -2124,13 +2148,13 @@ describe(`Query Collections`, () => {
     })
   })
 
-  describe(`Suspense Integration`, () => {
+  describe(`Loading Integration`, () => {
     /**
      * A suspended owner can disappear before its initial preload settles. Its
      * later completion belongs to that disposed owner and must not publish
      * resource state or touch the released preload observer.
      */
-    it(`discards a pending preload after its Suspense owner unmounts`, async () => {
+    it(`discards a pending preload after its Loading owner unmounts`, async () => {
       let markReady: (() => void) | undefined
       const source = createCollection<Person>({
         id: `solid-suspense-abandoned-pending-preload`,
@@ -2157,9 +2181,9 @@ describe(`Query Collections`, () => {
       }
 
       const view = render(() => (
-        <Suspense fallback={<div data-testid="pending-waiting">Waiting</div>}>
+        <Loading fallback={<div data-testid="pending-waiting">Waiting</div>}>
           <Pending />
-        </Suspense>
+        </Loading>
       ))
 
       try {
@@ -2170,7 +2194,18 @@ describe(`Query Collections`, () => {
         await queryCollection!.preload()
         await waitFor(() => expect(queryCollection!.status).toBe(`cleaned-up`))
         expect(readAbandonedStatus!()).not.toBe(`error`)
-        expect(readAbandoned!).not.toThrow()
+        // The abandoned read never settled, so it still waits; what matters
+        // is that the discarded preload does not surface as a load error.
+        let abandonedError: unknown
+        try {
+          readAbandoned!()
+        } catch (error) {
+          abandonedError = error
+        }
+        expect(
+          abandonedError === undefined ||
+            abandonedError instanceof NotReadyError,
+        ).toBe(true)
       } finally {
         view.unmount()
         await source.cleanup()
@@ -2185,7 +2220,7 @@ describe(`Query Collections`, () => {
      * observer so ordinary 1 ms retirement still applies after unmount.
      */
     it.each([`commit`, `abandon`] as const)(
-      `retains a ready sibling until the Suspense boundary reaches %s`,
+      `retains a ready sibling until the Loading boundary reaches %s`,
       async (outcome) => {
         type Controls = { markReady: () => void }
         const controls: Array<Controls> = []
@@ -2225,10 +2260,10 @@ describe(`Query Collections`, () => {
 
         vi.useFakeTimers()
         const view = render(() => (
-          <Suspense fallback={<div data-testid="sibling-waiting">Waiting</div>}>
+          <Loading fallback={<div data-testid="sibling-waiting">Waiting</div>}>
             <First />
             <Second />
-          </Suspense>
+          </Loading>
         ))
 
         try {
@@ -2262,7 +2297,7 @@ describe(`Query Collections`, () => {
       },
     )
 
-    it(`should work with Suspense boundaries`, async () => {
+    it(`should work with Loading boundaries`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
           id: `test-persons-suspense`,
@@ -2291,9 +2326,9 @@ describe(`Query Collections`, () => {
       }
 
       const { findByTestId } = render(() => (
-        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+        <Loading fallback={<div data-testid="loading">Loading...</div>}>
           <TestComponent />
-        </Suspense>
+        </Loading>
       ))
 
       // Should eventually show the list with data
@@ -2338,9 +2373,9 @@ describe(`Query Collections`, () => {
       }
 
       const { findByTestId } = render(() => (
-        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+        <Loading fallback={<div data-testid="loading">Loading...</div>}>
           <TestComponent />
-        </Suspense>
+        </Loading>
       ))
 
       // Should eventually resolve and show data
@@ -2369,12 +2404,15 @@ describe(`Query Collections`, () => {
 
       function RowComponent(props: { person: { id: string; name: string } }) {
         const id = props.person.id
-        // createComputed fires once initially and again each time person.name changes
-        createComputed(() => {
-          // Access name to subscribe to it
-          void props.person.name
-          nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
-        })
+        // createRenderEffect fires once initially and again each time person.name changes
+        createRenderEffect(
+          () => {
+            // Access name to subscribe to it
+            void props.person.name
+            nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
+          },
+          () => {},
+        )
         return <li data-testid={`person-${id}`}>{props.person.name}</li>
       }
 

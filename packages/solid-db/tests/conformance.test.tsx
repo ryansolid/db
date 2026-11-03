@@ -25,12 +25,15 @@ import {
   sum,
 } from '@tanstack/db'
 import {
+  Errored,
+  NotReadyError,
   createRenderEffect,
   createRoot,
   createSignal,
+  createStore,
+  flush,
   onCleanup,
 } from 'solid-js'
-import { createStore } from 'solid-js/store'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
@@ -140,39 +143,73 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
+// A computation's error read outside any <Errored> reaches the reader as
+// Solid's status wrapper, whose `cause` is the thrown value. <Errored> hands
+// its fallback the thrown value itself; the driver reads it the same way.
+function thrownValue(error: unknown) {
+  return error instanceof Error &&
+    `source` in error &&
+    error.cause !== undefined &&
+    error.constructor.name === `StatusError`
+    ? error.cause
+    : error
+}
+
+function solidRead<T>(read: () => T): T {
+  try {
+    return read()
+  } catch (error) {
+    throw thrownValue(error)
+  }
+}
+
+// Before the first ready state, reading the result waits: Solid 2 throws
+// NotReadyError for the nearest <Loading>. The driver records that as no
+// published value, the same as a loading turn before settled rows.
+function readData(result: any) {
+  try {
+    return result?.()
+  } catch (error) {
+    if (error instanceof NotReadyError) return undefined
+    throw thrownValue(error)
+  }
+}
+
 function makeHandle(
   getResult: () => any,
   dispose: () => void,
 ): LiveQueryHandle {
   return {
-    collection: () => getResult()?.collection ?? null,
+    collection: () => solidRead(() => getResult()?.collection ?? null),
     current(): ConformanceResult {
       const result = getResult()
-      return expectResultSurface({
-        data: result?.(),
-        state: result?.state,
-        status: result?.status,
-        isReady: result?.isReady,
-        isLoadingError: result?.isLoadingError,
-        isCrashed: result?.isCrashed,
-        isSyncError: result?.isSyncError,
-        // solid-db exposes no `isEnabled`; derive it from status (status-derived).
-        isEnabled: result?.status !== `disabled`,
-        health: result?.health,
-      })
+      return solidRead(() =>
+        expectResultSurface({
+          data: readData(result),
+          state: result?.state,
+          status: result?.status,
+          isReady: result?.isReady,
+          isLoadingError: result?.isLoadingError,
+          isCrashed: result?.isCrashed,
+          isSyncError: result?.isSyncError,
+          // solid-db exposes no `isEnabled`; derive it from status (status-derived).
+          isEnabled: result?.status !== `disabled`,
+          health: result?.health,
+        }),
+      )
     },
     // The hook's flags are getters that do not read the resource, so they
-    // stay readable when reading `data` throws for an <ErrorBoundary>.
+    // stay readable when reading `data` throws for an <Errored>.
     statusSurface() {
       const result = getResult()
-      return {
+      return solidRead(() => ({
         status: result?.status,
         isReady: result?.isReady,
         isLoadingError: result?.isLoadingError,
         isCrashed: result?.isCrashed,
         isSyncError: result?.isSyncError,
         health: result?.health,
-      }
+      }))
     },
     flush: settle,
     async apply(fn: () => void) {
@@ -190,9 +227,27 @@ function inRoot(fn: () => any): { getResult: () => any; dispose: () => void } {
   let dispose!: () => void
   withScopeSetup(
     () =>
-      createRoot((d) => {
-        dispose = d
-        result = fn()
+      solidRead(() => {
+        // Setup errors reach the caller, as the shared scope contract asks.
+        let setupFailure: { error: unknown } | undefined
+        createRoot((d) => {
+          dispose = d
+          // An app mounts queries under <Errored>; an error with no boundary
+          // halts all of Solid's reactivity, not only this mount.
+          const view = Errored({
+            fallback: () => null,
+            get children() {
+              try {
+                result = fn()
+              } catch (error) {
+                setupFailure = { error }
+              }
+              return null
+            },
+          }) as unknown as () => unknown
+          createRenderEffect(view, () => {})
+        })
+        if (setupFailure) throw setupFailure.error
       }),
     () => dispose(),
   )
@@ -232,7 +287,7 @@ function mountControllable<P>(
   initial: P,
   opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
-  const [param, setParam] = createSignal<P>(initial)
+  const [param, setParam] = createSignal<P>(initial as never)
   const published = createPublicationLog()
   const { getResult, dispose } = inRoot(() => {
     const query =
@@ -245,7 +300,10 @@ function mountControllable<P>(
         : // Reading param() inside the query fn makes Solid recompute on change.
           useLiveQuery((q: any) => build(q, param()))
     // Solid renders the value each render effect reads.
-    createRenderEffect(() => published.record(query(), query.state))
+    createRenderEffect(
+      () => published.record(query(), query.state),
+      () => {},
+    )
     return query
   })
   const handle = makeHandle(getResult, dispose)
@@ -255,10 +313,13 @@ function mountControllable<P>(
     statePublications: published.stateValues,
     async setParam(next: P, observe?: () => void) {
       setParam(() => next)
+      // Solid 2 applies writes at the next flush; flushing here is the
+      // synchronous propagation this driver declares as its observation cut.
+      flush()
       observe?.()
       // The first paint after the change: the framework ran its reactive
       // work synchronously, but no later task has run.
-      published.record(getResult()(), getResult().state)
+      published.record(readData(getResult()), getResult().state)
       await settle()
     },
   }
@@ -273,7 +334,8 @@ const solidDriver: LiveQueryDriver = {
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
-  wrapSnapshotValue: <T extends object>(value: T) => createStore(value)[0],
+  wrapSnapshotValue: <T extends object>(value: T) =>
+    createStore(value as never)[0] as T,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(
@@ -293,8 +355,8 @@ const solidDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // solid-db routes errors through its createResource/Suspense path: reading an
-  // errored query throws (CollectionStateError) for an <ErrorBoundary> to catch,
+  // solid-db routes errors through its createResource/Loading path: reading an
+  // errored query throws (CollectionStateError) for an <Errored> to catch,
   // rather than exposing a readable isLoadingError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,

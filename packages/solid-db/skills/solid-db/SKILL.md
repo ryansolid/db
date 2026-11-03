@@ -4,9 +4,9 @@ description: >
   SolidJS bindings for TanStack DB. useLiveQuery returns an Accessor that
   doubles as data access (call as function) with state/status properties.
   Fine-grained reactivity: signal reads MUST happen inside the query function
-  for tracking. Config passed as Accessor (() => config). Built-in Suspense
-  support via createResource and errors through Solid ErrorBoundary.
-  ReactiveMap for state. Import from
+  for tracking. Config passed as Accessor (() => config). Requires Solid 2:
+  reading data waits under <Loading> until first ready, and load errors
+  and crashes reach <Errored>. ReactiveMap for state. Import from
   @tanstack/solid-db (re-exports all of @tanstack/db).
 type: framework
 library: db
@@ -27,7 +27,7 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 
 ```tsx
 import { useLiveQuery, eq, not } from '@tanstack/solid-db'
-import { ErrorBoundary, For, Show, Suspense } from 'solid-js'
+import { For, Loading } from 'solid-js'
 
 function TodoList() {
   const todosQuery = useLiveQuery((q) =>
@@ -38,16 +38,17 @@ function TodoList() {
   )
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
         <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
       </ul>
-    </Suspense>
+    </Loading>
   )
 }
 ```
 
-`@tanstack/solid-db` re-exports everything from `@tanstack/db`.
+`@tanstack/solid-db` re-exports everything from `@tanstack/db`. It requires
+Solid 2 (`solid-js` 2.0.0-rc.20 or later); Solid 1 apps use 0.3.x.
 
 ## Hook
 
@@ -132,21 +133,23 @@ const userQuery = useLiveQuery((q) =>
 return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
-### Suspense integration
+### Loading and Errored
 
 ```tsx
-<ErrorBoundary fallback={(error) => <div>{error.message}</div>}>
-  <Suspense fallback={<div>Loading...</div>}>
+<Errored fallback={(error) => <div>{error().message}</div>}>
+  <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-  </Suspense>
-</ErrorBoundary>
+  </Loading>
+</Errored>
 ```
 
-`useLiveQuery` integrates with Solid's `createResource`. Use `<Suspense>` for
-loading and `<ErrorBoundary>` for errors. Reading an errored query throws
-through the resource, so do not rely on reading `isLoadingError` after failure.
-After the first data, sync problems do not throw: read `isSyncError` or
-`health`. `isError` and node `phase` were removed.
+Reading `query()` is a Solid 2 async read. Until the query is first ready it
+waits, and `<Loading>` shows its fallback; later updates arrive in place.
+A failed first load and a crash at any time throw to `<Errored>`, so do not
+rely on reading `isLoadingError` after failure. After the first ready state,
+sync problems do not throw: read `isSyncError` or `health`. Status properties
+and `query.state` never wait, and `query.state` holds rows synced before the
+first ready state. `isError` and node `phase` were removed.
 
 ## Includes (Hierarchical Data)
 
