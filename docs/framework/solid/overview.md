@@ -9,7 +9,7 @@ id: adapter
 npm install @tanstack/solid-db solid-js@next
 ```
 
-`@tanstack/solid-db` 1.0 requires Solid 2 (`solid-js` 2.0.0-rc.20 or later). Solid 1 apps use `@tanstack/solid-db` 0.3.x or the earlier 1.0 release candidates (1.0.0-rc.1.2 and before).
+`@tanstack/solid-db` 1.0 requires Solid 2 (`solid-js` 2.0.0 or later). Solid 1 apps use `@tanstack/solid-db` 0.3.x or the earlier 1.0 release candidates (1.0.0-rc.1.2 and before).
 
 ## Solid Primitives
 

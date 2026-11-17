@@ -48,7 +48,7 @@ function TodoList() {
 ```
 
 `@tanstack/solid-db` re-exports everything from `@tanstack/db`. It requires
-Solid 2 (`solid-js` 2.0.0-rc.20 or later); Solid 1 apps use 0.3.x.
+Solid 2 (`solid-js` 2.0.0 or later); Solid 1 apps use 0.3.x.
 
 ## Hook
 
