@@ -301,8 +301,9 @@ export function useLiveQuery(
   // and a Collection write made from a memo publishes synchronously. Writes
   // into the hook's state therefore run outside any owner.
   const publish = (write: () => void) => runWithOwner(null, write)
+  // Follows the current collection; change events write it in between.
   const [status, setStatus] = createSignal<CollectionStatus | `disabled`>(
-    untrack(() => collection()?.status ?? `disabled`),
+    () => collection()?.status ?? `disabled`,
     { name: `TanstackDBStatus`, ownedWrite: true },
   )
   const [health, setHealth] = createSignal<HealthNode | undefined>(undefined, {

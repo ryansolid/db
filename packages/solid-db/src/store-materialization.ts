@@ -1,4 +1,4 @@
-import { createStore, reconcile, untrack } from 'solid-js'
+import { createStore, reconcile } from 'solid-js'
 
 /**
  * Materializes one result row as a Solid store.
@@ -11,25 +11,20 @@ import { createStore, reconcile, untrack } from 'solid-js'
  * store identity even when an array reorders around it.
  */
 export function createRowStore<T extends object>(source: T) {
-  return untrack(() => {
-    const [row, setRow] = createStore<T>(source as never)
-    const entry = {
-      value: row as T,
-      update(nextSource: T) {
-        if (nextSource === source) return
-        const previous = source
-        source = nextSource
-        untrack(() =>
-          setRow(
-            reconcile(nextSource, (item: unknown) =>
-              // The root is the same row across updates. Nested objects are
-              // the same value only when the source kept the same object.
-              item === previous || item === nextSource ? undefined : item,
-            ) as never,
-          ),
-        )
-      },
-    }
-    return entry
-  })
+  const [row, setRow] = createStore<T>(source as never)
+  return {
+    value: row as T,
+    update(nextSource: T) {
+      if (nextSource === source) return
+      const previous = source
+      source = nextSource
+      setRow(
+        reconcile(nextSource, (item: unknown) =>
+          // The root is the same row across updates. Nested objects are
+          // the same value only when the source kept the same object.
+          item === previous || item === nextSource ? undefined : item,
+        ) as never,
+      )
+    },
+  }
 }
